@@ -17,7 +17,7 @@
 </div>
 
 This repository contains the code for the experiments in the paper - [Preferenced Oracle Guided Multi-mode Policies for Dynamic Bipedal Loco-Manipulation
-](https://arxiv.org/abs/2410.01030). Check out the project [website](https://indweller.github.io/ogmplm/) for more details.
+](https://ieeexplore.ieee.org/document/11246602). Check out the project [website](https://indweller.github.io/ogmplm/) for more details.
 
 Authors: Prashanth Ravichandar, Lokesh Krishna, Nikhil Sobanbabu and Quan Nguyen
 
@@ -85,15 +85,16 @@ NOTE:
 If you use this code, please cite the following paper:
 
 ```
-@misc{ravichandar2025preferencedoracleguidedmultimode,
-      title={Preferenced Oracle Guided Multi-mode Policies for Dynamic Bipedal Loco-Manipulation}, 
-      author={Prashanth Ravichandar and Lokesh Krishna and Nikhil Sobanbabu and Quan Nguyen},
-      year={2025},
-      eprint={2410.01030},
-      archivePrefix={arXiv},
-      primaryClass={cs.RO},
-      url={https://arxiv.org/abs/2410.01030}, 
-}
+@INPROCEEDINGS{11246602,
+  author={Ravichandar, Prashanth and Krishna, Lokesh and Sobanbabu, Nikhil and Nguyen, Quan},
+  booktitle={2025 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)}, 
+  title={Preferenced Oracle Guided Multi-mode Policies for Dynamic Bipedal Loco-Manipulation}, 
+  year={2025},
+  volume={},
+  number={},
+  pages={6600-6606},
+  keywords={Training;Learning automata;Dynamics;Humanoid robots;Automata;Morphology;Switches;Optimization;Intelligent robots;Sports},
+  doi={10.1109/IROS60139.2025.11246602}}
 ```
 For the theory on oracle guided policy optimization, refer to the paper [OGMP: Oracle Guided Multi-mode Policies for Agile and Versatile Robot Control](https://arxiv.org/abs/2403.04205).
 
