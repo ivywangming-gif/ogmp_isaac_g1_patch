@@ -4,7 +4,7 @@
 
 import argparse
 
-from omni.isaac.lab.app import AppLauncher
+from isaaclab.app import AppLauncher
 
 # local imports
 import cli_args  # isort: skip
@@ -22,6 +22,7 @@ parser.add_argument("--seed", type=int, default=None, help="Seed used for the en
 parser.add_argument("--yaml_config", type=str, default=None, help="Path to the yaml configuration file.")
 parser.add_argument("--visualize", action="store_true", default=False, help="Visualize the environment.")
 parser.add_argument("--visualize_goalpost", action="store_true", default=False, help="Visualize the goalpost.")
+parser.add_argument("--max_steps", type=int, default=None, help="Maximum number of play steps before exiting.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -46,10 +47,11 @@ from typing import Any
 
 from rsl_rl.runners import OnPolicyRunner
 
-from omni.isaac.lab.envs import DirectMARLEnv, multi_agent_to_single_agent
-from omni.isaac.lab.utils.dict import print_dict
-from omni.isaac.lab_tasks.utils import get_checkpoint_path, parse_env_cfg
-from omni.isaac.lab_tasks.utils.wrappers.rsl_rl import (
+from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
+from isaaclab.utils.dict import print_dict
+from isaaclab.utils.string import string_to_callable
+from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
+from isaaclab_rl.rsl_rl import (
     RslRlOnPolicyRunnerCfg,
     RslRlVecEnvWrapper,
     export_policy_as_jit,
@@ -182,34 +184,55 @@ def main():
     ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     ppo_runner.load(resume_path)
 
-    # obtain the trained policy for inference
+    print("[OGMP_DEBUG] creating inference policy", flush=True)
     policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
+    print("[OGMP_DEBUG] inference policy created", flush=True)
 
-    # export policy to onnx/jit
-    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(
-        ppo_runner.alg.actor_critic, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt"
-    )
-    export_policy_as_onnx(
-        ppo_runner.alg.actor_critic, normalizer=ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.onnx"
-    )
+    # NOTE:
+    # Isaac Lab 5.x / newer rsl_rl changed export and observation APIs.
+    # For play/debug we skip JIT/ONNX export and use the loaded checkpoint directly.
 
-    # reset environment
-    obs, _ = env.get_observations()
+    print("[OGMP_DEBUG] getting initial observations", flush=True)
+    obs = env.get_observations()
+    if isinstance(obs, tuple):
+        obs = obs[0]
+    print(f"[OGMP_DEBUG] initial obs type={type(obs)}", flush=True)
+
     timestep = 0
+    max_steps = args_cli.max_steps
+
+    print(f"[OGMP_DEBUG] entering play loop max_steps={max_steps}", flush=True)
+
     # simulate environment
     while simulation_app.is_running():
-        # run everything in inference mode
         with torch.inference_mode():
-            # agent stepping
             actions = policy(obs)
-            # env stepping
-            obs, _, _, _ = env.step(actions)
-        if args_cli.video:
-            timestep += 1
-            # Exit the play loop after recording one video
-            if timestep == args_cli.video_length:
-                break
+            step_out = env.step(actions)
+
+            if len(step_out) == 4:
+                obs, _, dones, _ = step_out
+            elif len(step_out) == 5:
+                obs, _, terminated, truncated, _ = step_out
+                dones = terminated | truncated
+            else:
+                raise RuntimeError(f"Unexpected env.step return length: {len(step_out)}")
+
+            # Recurrent policies may expose reset(). Guard it for compatibility.
+            if hasattr(policy, "reset"):
+                policy.reset(dones)
+
+        timestep += 1
+
+        if timestep <= 5 or timestep % 50 == 0:
+            print(f"[OGMP_DEBUG] step={timestep}", flush=True)
+
+        if args_cli.video and timestep == args_cli.video_length:
+            print("[OGMP_DEBUG] video length reached; exiting loop", flush=True)
+            break
+
+        if max_steps is not None and timestep >= max_steps:
+            print(f"[OGMP_DEBUG] max_steps reached: {timestep}; exiting loop", flush=True)
+            break
 
     # close the simulator
     env.close()

@@ -8,8 +8,8 @@ from collections.abc import Iterable
 from dataclasses import MISSING
 from typing import Literal
 
-from omni.isaac.lab.actuators import DCMotorCfg, IdealPDActuatorCfg, ImplicitActuatorCfg
-from omni.isaac.lab.utils import configclass
+from isaaclab.actuators import DCMotorCfg, IdealPDActuatorCfg, ImplicitActuatorCfg
+from isaaclab.utils import configclass
 
 from . import actuator_pd
 from .actuator_pd import IdentifiedActuator

@@ -9,10 +9,10 @@ import torch
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from omni.isaac.core.utils.types import ArticulationActions
+from isaacsim.core.utils.types import ArticulationActions
 
-from omni.isaac.lab.actuators import DCMotor, IdealPDActuator, ImplicitActuator
-from omni.isaac.lab.utils import DelayBuffer, LinearInterpolation
+from isaaclab.actuators import DCMotor, IdealPDActuator, ImplicitActuator
+from isaaclab.utils import DelayBuffer, LinearInterpolation
 
 if TYPE_CHECKING:
     from .actuator_cfg import (

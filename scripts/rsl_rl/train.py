@@ -11,7 +11,7 @@ import argparse
 import sys
 import yaml
 
-from omni.isaac.lab.app import AppLauncher
+from isaaclab.app import AppLauncher
 
 # local imports
 import cli_args  # isort: skip
@@ -60,18 +60,31 @@ from datetime import datetime
 
 from rsl_rl.runners import OnPolicyRunner
 
-from omni.isaac.lab.envs import (
+from isaaclab.envs import (
     DirectMARLEnv,
     DirectMARLEnvCfg,
     DirectRLEnvCfg,
     ManagerBasedRLEnvCfg,
     multi_agent_to_single_agent,
 )
-from omni.isaac.lab.utils.dict import print_dict
-from omni.isaac.lab.utils.io import dump_pickle, dump_yaml
-from omni.isaac.lab_tasks.utils import get_checkpoint_path
-from omni.isaac.lab_tasks.utils.hydra import hydra_task_config
-from omni.isaac.lab_tasks.utils.wrappers.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+from isaaclab.utils.dict import print_dict
+# Isaac Lab 5.x compatibility:
+# In Isaac Lab 5.x, dump_yaml is still available and can serialize configclass objects.
+# dump_pickle may no longer be re-exported from isaaclab.utils.io, so define only that fallback.
+from isaaclab.utils.io import dump_yaml
+
+try:
+    from isaaclab.utils.io import dump_pickle
+except ImportError:
+    import os
+    import pickle
+
+    def dump_pickle(filename, data):
+        os.makedirs(os.path.dirname(str(filename)), exist_ok=True)
+        with open(filename, "wb") as f:
+            pickle.dump(data, f)
+from isaaclab_tasks.utils.hydra import hydra_task_config
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 
 # Import extensions to set up environment tasks
 import ogmp_isaac.tasks  # noqa: F401
@@ -85,7 +98,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 # Removed error for the iterable from the original function
-from omni.isaac.lab.utils.string import string_to_callable
+from isaaclab.utils.string import string_to_callable
 
 
 def custom_update_class_from_dict(obj, data: dict[str, Any], _ns: str = "") -> None:

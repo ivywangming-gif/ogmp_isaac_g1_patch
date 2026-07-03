@@ -1,8 +1,8 @@
 import os
 
-import omni.isaac.lab.sim as sim_utils
-from omni.isaac.lab.assets.articulation import ArticulationCfg
-from omni.isaac.lab.utils import configclass
+import isaaclab.sim as sim_utils
+from isaaclab.assets.articulation import ArticulationCfg
+from isaaclab.utils import configclass
 
 from ogmp_isaac.assets.actuators import (
     HectorV1p5DCActuatorCfg,

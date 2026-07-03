@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from omni.isaac.lab.assets.articulation import ArticulationCfg
+from isaaclab.assets.articulation import ArticulationCfg
 
 
 @dataclass

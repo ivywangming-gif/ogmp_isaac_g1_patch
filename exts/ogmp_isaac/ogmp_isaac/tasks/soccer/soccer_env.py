@@ -1,13 +1,13 @@
 import os
 import torch
 
-import omni.isaac.lab.sim as sim_utils
-from omni.isaac.lab.assets import Articulation, ArticulationCfg, RigidObject, RigidObjectCfg
-from omni.isaac.lab.markers import VisualizationMarkers, VisualizationMarkersCfg
-from omni.isaac.lab.sensors import ContactSensor, ContactSensorCfg
-from omni.isaac.lab.utils import configclass
-from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
-from omni.isaac.lab.utils.math import euler_xyz_from_quat, quat_from_euler_xyz, quat_rotate_inverse
+import isaaclab.sim as sim_utils
+from isaaclab.assets import Articulation, ArticulationCfg, RigidObject, RigidObjectCfg
+from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
+from isaaclab.sensors import ContactSensor, ContactSensorCfg
+from isaaclab.utils import configclass
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+from isaaclab.utils.math import euler_xyz_from_quat, quat_from_euler_xyz, quat_rotate_inverse
 
 from ogmp_isaac.assets import *
 from ogmp_isaac.assets import GOAL_DEPTH, GOALPOSTS_CFG

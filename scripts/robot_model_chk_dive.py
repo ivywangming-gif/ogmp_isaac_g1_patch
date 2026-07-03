@@ -10,7 +10,7 @@ import torch
 
 torch.set_printoptions(precision=2, sci_mode=False)
 
-from omni.isaac.lab.app import AppLauncher
+from isaaclab.app import AppLauncher
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="This script demonstrates how to simulate a bipedal robot.")
@@ -25,10 +25,10 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import omni.isaac.lab.sim as sim_utils
-from omni.isaac.lab.assets import Articulation
-from omni.isaac.lab.sim import SimulationContext
-from omni.isaac.lab.terrains import TerrainGeneratorCfg, TerrainImporterCfg
+import isaaclab.sim as sim_utils
+from isaaclab.assets import Articulation
+from isaaclab.sim import SimulationContext
+from isaaclab.terrains import TerrainGeneratorCfg, TerrainImporterCfg
 
 ##
 # Pre-defined configs
@@ -71,7 +71,7 @@ def main():
     # Ground-plane
     # cfg = sim_utils.GroundPlaneCfg()
     # cfg.func("/World/defaultGroundPlane", cfg)
-    import omni.isaac.lab.terrains as terrain_gen
+    import isaaclab.terrains as terrain_gen
 
     terrain_generator_cfg = TerrainGeneratorCfg(
         size=(2.5, 2.5),
