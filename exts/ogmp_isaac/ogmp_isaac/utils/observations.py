@@ -99,3 +99,41 @@ def obs_box_dist(env):
 
 def obs_target_dist(env):
     return env.target_pos - env.robot.data.root_pos_w[:, :2]
+
+
+def _hand_body_pos_w(env):
+    body_pos_w = getattr(env.robot.data, "body_link_pos_w", None)
+    if body_pos_w is None:
+        body_pos_w = env.robot.data.body_pos_w
+    left = body_pos_w[:, env.left_hand_body_idx, :3]
+    right = body_pos_w[:, env.right_hand_body_idx, :3]
+    return left, right
+
+def obs_hand_contact_target_delta(env):
+    left_hand_w, right_hand_w = _hand_body_pos_w(env)
+    left_delta = env.left_contact_target_w - left_hand_w
+    right_delta = env.right_contact_target_w - right_hand_w
+    return torch.cat((left_delta, right_delta), dim=-1)
+
+def obs_hand_contact_target_error(env):
+    left_hand_w, right_hand_w = _hand_body_pos_w(env)
+    left_err = torch.linalg.norm(env.left_contact_target_w - left_hand_w, dim=-1, keepdim=True)
+    right_err = torch.linalg.norm(env.right_contact_target_w - right_hand_w, dim=-1, keepdim=True)
+    return torch.cat((left_err, right_err), dim=-1)
+
+def obs_contact_mode_onehot(env):
+    return torch.nn.functional.one_hot(
+        env.contact_mode_ids,
+        num_classes=len(env._contact_mode_names),
+    ).float()
+
+def obs_box_goal_yaw(env):
+    return torch.stack(
+        (
+            torch.sin(env.box_yaw),
+            torch.cos(env.box_yaw),
+            torch.sin(env.target_yaw),
+            torch.cos(env.target_yaw),
+        ),
+        dim=-1,
+    )

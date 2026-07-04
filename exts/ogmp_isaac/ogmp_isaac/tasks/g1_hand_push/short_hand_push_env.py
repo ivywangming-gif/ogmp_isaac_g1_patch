@@ -26,10 +26,10 @@ class FlatBoxEnvCfg(BaseEnvCfg):
     #     + base_ang_vel(3) + joint_vel(37) + box_dist(2)
     #     + target_dist(2) + sinusoid_phase(2) = 91
     # action = 37 G1 joints
-    observation_space = 91
+    observation_space = 109
     action_space = 37
     state_space = 0
-    num_observations = 91
+    num_observations = 109
     num_actions = 37
     marker_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/Visuals/myMarkers",
@@ -64,6 +64,10 @@ class FlatBoxEnvCfg(BaseEnvCfg):
         "box_dist",
         "target_dist",
         "sinusoid_phase",
+        "hand_contact_target_delta",
+        "hand_contact_target_error",
+        "contact_mode_onehot",
+        "box_goal_yaw",
     ]
     terminations = {
         "base_pos_x": 0.4,

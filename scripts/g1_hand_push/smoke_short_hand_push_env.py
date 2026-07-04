@@ -7,6 +7,7 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description="Smoke test G1-Hand-ShortPush contact target debug.")
 parser.add_argument("--num_envs", type=int, default=1)
 parser.add_argument("--num_resets", type=int, default=5)
+parser.add_argument("--num_steps", type=int, default=10)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -35,9 +36,18 @@ def main():
     env = FlatBoxEnv(cfg, render_mode=None)
 
     try:
-        for _ in range(args_cli.num_resets):
-            env.reset()
+        obs, _ = env.reset()
+        print(f"[G1_HAND_OBS_DEBUG] policy_shape={tuple(obs['policy'].shape)}", flush=True)
 
+        for _ in range(args_cli.num_resets - 1):
+            obs, _ = env.reset()
+            print(f"[G1_HAND_OBS_DEBUG] policy_shape={tuple(obs['policy'].shape)}", flush=True)
+
+        actions = env.robot.data.default_joint_pos.clone()
+        for _ in range(args_cli.num_steps):
+            obs, rew, terminated, truncated, info = env.step(actions)
+
+        print(f"[G1_HAND_STEP_DEBUG] steps={args_cli.num_steps} policy_shape={tuple(obs['policy'].shape)}", flush=True)
         print("G1_HAND_SHORT_PUSH_ENV_SMOKE_OK", flush=True)
     finally:
         env.close()
