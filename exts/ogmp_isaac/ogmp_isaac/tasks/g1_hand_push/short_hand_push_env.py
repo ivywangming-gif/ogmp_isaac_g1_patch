@@ -98,6 +98,8 @@ class FlatBoxEnvCfg(BaseEnvCfg):
     debug_contact_modes = True
     debug_contact_modes_max_prints = 5
     debug_hand_target_errors = True
+    select_reachable_contact_mode = True
+    allow_contact_target_swap = True
     box_yaw_lim = [-3.14159265, 3.14159265]
     goal_yaw_lim = [-3.14159265, 3.14159265]
 
@@ -116,6 +118,7 @@ class FlatBoxEnv(BaseEnv):
         self.contact_mode_ids = torch.zeros((self.num_envs,), dtype=torch.long, device=self.sim.device)
         self.left_contact_target_w = torch.zeros((self.num_envs, 3), device=self.sim.device)
         self.right_contact_target_w = torch.zeros((self.num_envs, 3), device=self.sim.device)
+        self.contact_target_swapped = torch.zeros((self.num_envs,), dtype=torch.bool, device=self.sim.device)
         self._contact_mode_names = get_mode_names()
         self._contact_debug_print_count = 0
         self.left_hand_body_idx, self.left_hand_body_name = self._resolve_debug_hand_body("left")
@@ -214,21 +217,82 @@ class FlatBoxEnv(BaseEnv):
             + self.cfg.goal_yaw_lim[0]
         )
 
-        self.contact_mode_ids[env_ids] = torch.randint(
-            low=0,
-            high=len(self._contact_mode_names),
-            size=(num_reset_envs,),
-            device=self.sim.device,
-            dtype=torch.long,
-        )
+        if self.cfg.select_reachable_contact_mode:
+            body_pos_w = getattr(self.robot.data, "body_link_pos_w", None)
+            if body_pos_w is None:
+                body_pos_w = self.robot.data.body_pos_w
 
-        left_w, right_w = local_contacts_to_world(
-            box_start_state[:, :3],
-            self.box_yaw[env_ids],
-            self.contact_mode_ids[env_ids],
-        )
-        self.left_contact_target_w[env_ids] = left_w
-        self.right_contact_target_w[env_ids] = right_w
+            left_hand_w = body_pos_w[env_ids, self.left_hand_body_idx, :3]
+            right_hand_w = body_pos_w[env_ids, self.right_hand_body_idx, :3]
+
+            all_costs = []
+            all_left_targets = []
+            all_right_targets = []
+            all_swaps = []
+
+            for mode_id in range(len(self._contact_mode_names)):
+                mode_ids = torch.full(
+                    (num_reset_envs,),
+                    mode_id,
+                    device=self.sim.device,
+                    dtype=torch.long,
+                )
+                cand_left_w, cand_right_w = local_contacts_to_world(
+                    box_start_state[:, :3],
+                    self.box_yaw[env_ids],
+                    mode_ids,
+                )
+
+                direct_cost = (
+                    torch.linalg.norm(cand_left_w - left_hand_w, dim=-1)
+                    + torch.linalg.norm(cand_right_w - right_hand_w, dim=-1)
+                )
+                swap_cost = (
+                    torch.linalg.norm(cand_right_w - left_hand_w, dim=-1)
+                    + torch.linalg.norm(cand_left_w - right_hand_w, dim=-1)
+                )
+
+                use_swap = self.cfg.allow_contact_target_swap & (swap_cost < direct_cost)
+                best_cost = torch.where(use_swap, swap_cost, direct_cost)
+                best_left = torch.where(use_swap.unsqueeze(-1), cand_right_w, cand_left_w)
+                best_right = torch.where(use_swap.unsqueeze(-1), cand_left_w, cand_right_w)
+
+                all_costs.append(best_cost)
+                all_left_targets.append(best_left)
+                all_right_targets.append(best_right)
+                all_swaps.append(use_swap)
+
+            costs = torch.stack(all_costs, dim=1)
+            best_mode = torch.argmin(costs, dim=1)
+
+            left_stack = torch.stack(all_left_targets, dim=1)
+            right_stack = torch.stack(all_right_targets, dim=1)
+            swap_stack = torch.stack(all_swaps, dim=1)
+
+            gather_xyz = best_mode.view(-1, 1, 1).expand(-1, 1, 3)
+            gather_bool = best_mode.view(-1, 1)
+
+            self.contact_mode_ids[env_ids] = best_mode
+            self.left_contact_target_w[env_ids] = torch.gather(left_stack, 1, gather_xyz).squeeze(1)
+            self.right_contact_target_w[env_ids] = torch.gather(right_stack, 1, gather_xyz).squeeze(1)
+            self.contact_target_swapped[env_ids] = torch.gather(swap_stack, 1, gather_bool).squeeze(1)
+        else:
+            self.contact_mode_ids[env_ids] = torch.randint(
+                low=0,
+                high=len(self._contact_mode_names),
+                size=(num_reset_envs,),
+                device=self.sim.device,
+                dtype=torch.long,
+            )
+
+            left_w, right_w = local_contacts_to_world(
+                box_start_state[:, :3],
+                self.box_yaw[env_ids],
+                self.contact_mode_ids[env_ids],
+            )
+            self.left_contact_target_w[env_ids] = left_w
+            self.right_contact_target_w[env_ids] = right_w
+            self.contact_target_swapped[env_ids] = False
 
         self._print_contact_debug(env_ids, box_start_state[:, :3])
 
@@ -283,6 +347,7 @@ class FlatBoxEnv(BaseEnv):
             f"goal_yaw={float(self.target_yaw[env_id].detach().cpu()):+.3f} "
             f"mode_id={mode_id} "
             f"mode={self._contact_mode_names[mode_id]} "
+            f"swapped={bool(self.contact_target_swapped[env_id].detach().cpu())} "
             f"left_w={self._fmt_debug_vec(self.left_contact_target_w[env_id])} "
             f"right_w={self._fmt_debug_vec(self.right_contact_target_w[env_id])} "
             f"left_body={self.left_hand_body_name} "
@@ -306,6 +371,7 @@ class FlatBoxEnv(BaseEnv):
             "contact_mode_ids": self.contact_mode_ids,
             "left_contact_target_w": self.left_contact_target_w,
             "right_contact_target_w": self.right_contact_target_w,
+            "contact_target_swapped": self.contact_target_swapped,
         }
         return feedback
 
