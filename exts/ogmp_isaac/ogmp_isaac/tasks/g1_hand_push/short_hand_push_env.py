@@ -93,6 +93,7 @@ class FlatBoxEnvCfg(BaseEnvCfg):
     # Env-level debug only: sample SE(2) goal and P1 two-hand contact mode.
     debug_contact_modes = True
     debug_contact_modes_max_prints = 5
+    debug_hand_target_errors = True
     box_yaw_lim = [-3.14159265, 3.14159265]
     goal_yaw_lim = [-3.14159265, 3.14159265]
 
@@ -113,6 +114,14 @@ class FlatBoxEnv(BaseEnv):
         self.right_contact_target_w = torch.zeros((self.num_envs, 3), device=self.sim.device)
         self._contact_mode_names = get_mode_names()
         self._contact_debug_print_count = 0
+        self.left_hand_body_idx, self.left_hand_body_name = self._resolve_debug_hand_body("left")
+        self.right_hand_body_idx, self.right_hand_body_name = self._resolve_debug_hand_body("right")
+        if self.cfg.debug_contact_modes:
+            print(
+                f"[G1_HAND_BODY_DEBUG] left={self.left_hand_body_name}[{self.left_hand_body_idx}] "
+                f"right={self.right_hand_body_name}[{self.right_hand_body_idx}]",
+                flush=True,
+            )
         self.start_angle = torch.deg2rad(torch.tensor(self.cfg.omni_direction_lim[0], device=self.sim.device))
         self.end_angle = torch.deg2rad(torch.tensor(self.cfg.omni_direction_lim[1], device=self.sim.device))
         if self.cfg.visualize_markers:
@@ -219,6 +228,25 @@ class FlatBoxEnv(BaseEnv):
 
         self._print_contact_debug(env_ids, box_start_state[:, :3])
 
+    def _resolve_debug_hand_body(self, side: str) -> tuple[int, str]:
+        names = getattr(self.robot, "body_names", None)
+        if names is None:
+            names = self.robot.data.body_names
+        names = list(names)
+
+        side_tokens = ["left", "l_"] if side == "left" else ["right", "r_"]
+        prefs = ["palm", "hand", "wrist_yaw", "wrist_roll", "wrist_pitch", "wrist"]
+
+        for pref in prefs:
+            for i, name in enumerate(names):
+                low = name.lower()
+                if any(tok in low for tok in side_tokens) and pref in low:
+                    return i, name
+
+        raise RuntimeError(
+            f"Could not resolve {side} hand/wrist body. Available body names: {names}"
+        )
+
     def _fmt_debug_vec(self, x: torch.Tensor) -> list[float]:
         return [round(float(v), 4) for v in x.detach().cpu().tolist()]
 
@@ -232,6 +260,15 @@ class FlatBoxEnv(BaseEnv):
         env_id = int(env_ids[local_idx].item())
         mode_id = int(self.contact_mode_ids[env_id].item())
 
+        body_pos_w = getattr(self.robot.data, "body_link_pos_w", None)
+        if body_pos_w is None:
+            body_pos_w = self.robot.data.body_pos_w
+
+        left_hand_w = body_pos_w[env_id, self.left_hand_body_idx, :3]
+        right_hand_w = body_pos_w[env_id, self.right_hand_body_idx, :3]
+        left_err = torch.linalg.norm(left_hand_w - self.left_contact_target_w[env_id])
+        right_err = torch.linalg.norm(right_hand_w - self.right_contact_target_w[env_id])
+
         print(
             "[G1_HAND_CONTACT_DEBUG] "
             f"reset={self._contact_debug_print_count} "
@@ -243,7 +280,13 @@ class FlatBoxEnv(BaseEnv):
             f"mode_id={mode_id} "
             f"mode={self._contact_mode_names[mode_id]} "
             f"left_w={self._fmt_debug_vec(self.left_contact_target_w[env_id])} "
-            f"right_w={self._fmt_debug_vec(self.right_contact_target_w[env_id])}",
+            f"right_w={self._fmt_debug_vec(self.right_contact_target_w[env_id])} "
+            f"left_body={self.left_hand_body_name} "
+            f"left_pos={self._fmt_debug_vec(left_hand_w)} "
+            f"left_err={float(left_err.detach().cpu()):.3f} "
+            f"right_body={self.right_hand_body_name} "
+            f"right_pos={self._fmt_debug_vec(right_hand_w)} "
+            f"right_err={float(right_err.detach().cpu()):.3f}",
             flush=True,
         )
         self._contact_debug_print_count += 1
