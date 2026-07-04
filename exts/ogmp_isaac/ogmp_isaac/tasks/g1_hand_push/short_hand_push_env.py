@@ -3,6 +3,10 @@ import torch
 import math
 
 import isaaclab.sim as sim_utils
+from ogmp_isaac.tasks.g1_hand_push.contact_modes import (
+    get_mode_names,
+    local_contacts_to_world,
+)
 from isaaclab.assets import RigidObject, RigidObjectCfg
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 from isaaclab.utils import configclass
@@ -47,7 +51,7 @@ class FlatBoxEnvCfg(BaseEnvCfg):
         "base_lin_vel": {"weight": 0.3, "exp_coeff": 2.0},
         "box_closeness": {"weight": 0.5, "threshold": 0.5},
         "preference": {"weight": -1.0,},
-        "torque_exp": {"weight": 0.15, "exp_coeff": 0.05},
+        "torque_exp_norm": {"weight": 0.15, "exp_coeff": 0.05},
         "action": {"weight": 0.15, "exp_coeff": 1.0},
     }
     observations = [
@@ -86,6 +90,12 @@ class FlatBoxEnvCfg(BaseEnvCfg):
     box_start = 1.0
     target = 3.0
 
+    # Env-level debug only: sample SE(2) goal and P1 two-hand contact mode.
+    debug_contact_modes = True
+    debug_contact_modes_max_prints = 5
+    box_yaw_lim = [-3.14159265, 3.14159265]
+    goal_yaw_lim = [-3.14159265, 3.14159265]
+
 
 class FlatBoxEnv(BaseEnv):
     cfg: FlatBoxEnvCfg
@@ -95,6 +105,14 @@ class FlatBoxEnv(BaseEnv):
 
         self.target_pos = torch.zeros((self.num_envs, 2), device=self.sim.device)
         self.heading_angles = torch.zeros((self.num_envs,), device=self.sim.device)
+        self.target_yaw = torch.zeros((self.num_envs,), device=self.sim.device)
+        self.box_yaw = torch.zeros((self.num_envs,), device=self.sim.device)
+
+        self.contact_mode_ids = torch.zeros((self.num_envs,), dtype=torch.long, device=self.sim.device)
+        self.left_contact_target_w = torch.zeros((self.num_envs, 3), device=self.sim.device)
+        self.right_contact_target_w = torch.zeros((self.num_envs, 3), device=self.sim.device)
+        self._contact_mode_names = get_mode_names()
+        self._contact_debug_print_count = 0
         self.start_angle = torch.deg2rad(torch.tensor(self.cfg.omni_direction_lim[0], device=self.sim.device))
         self.end_angle = torch.deg2rad(torch.tensor(self.cfg.omni_direction_lim[1], device=self.sim.device))
         if self.cfg.visualize_markers:
@@ -146,18 +164,28 @@ class FlatBoxEnv(BaseEnv):
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
+        num_reset_envs = env_ids.numel()
+
         # Randomize heading
         self.heading_angles[env_ids] = (
-            torch.rand((env_ids.numel(),), device=self.sim.device) * (self.end_angle - self.start_angle)
+            torch.rand((num_reset_envs,), device=self.sim.device) * (self.end_angle - self.start_angle)
             + self.start_angle
         )
         cos_heading = torch.cos(self.heading_angles[env_ids])
         sin_heading = torch.sin(self.heading_angles[env_ids])
 
+        self.box_yaw[env_ids] = (
+            torch.rand((num_reset_envs,), device=self.sim.device)
+            * (self.cfg.box_yaw_lim[1] - self.cfg.box_yaw_lim[0])
+            + self.cfg.box_yaw_lim[0]
+        )
+
         # Randomize box position
-        box_start_state = self.box.data.default_root_state[env_ids]
+        box_start_state = self.box.data.default_root_state[env_ids].clone()
         box_start_state[:, 0] = cos_heading * self.cfg.box_start
         box_start_state[:, 1] = sin_heading * self.cfg.box_start
+        zeros = torch.zeros_like(self.box_yaw[env_ids])
+        box_start_state[:, 3:7] = quat_from_euler_xyz(zeros, zeros, self.box_yaw[env_ids])
         box_start_state[:, :3] += self.scene.env_origins[env_ids]
         self.box.write_root_pose_to_sim(box_start_state[:, :7], env_ids)
         self.box.write_root_velocity_to_sim(box_start_state[:, 7:], env_ids)
@@ -167,12 +195,70 @@ class FlatBoxEnv(BaseEnv):
         self.target_pos[env_ids, 1] = sin_heading * self.cfg.target
         self.target_pos[env_ids, :2] += self.scene.env_origins[env_ids, :2]
 
+        self.target_yaw[env_ids] = (
+            torch.rand((num_reset_envs,), device=self.sim.device)
+            * (self.cfg.goal_yaw_lim[1] - self.cfg.goal_yaw_lim[0])
+            + self.cfg.goal_yaw_lim[0]
+        )
+
+        self.contact_mode_ids[env_ids] = torch.randint(
+            low=0,
+            high=len(self._contact_mode_names),
+            size=(num_reset_envs,),
+            device=self.sim.device,
+            dtype=torch.long,
+        )
+
+        left_w, right_w = local_contacts_to_world(
+            box_start_state[:, :3],
+            self.box_yaw[env_ids],
+            self.contact_mode_ids[env_ids],
+        )
+        self.left_contact_target_w[env_ids] = left_w
+        self.right_contact_target_w[env_ids] = right_w
+
+        self._print_contact_debug(env_ids, box_start_state[:, :3])
+
+    def _fmt_debug_vec(self, x: torch.Tensor) -> list[float]:
+        return [round(float(v), 4) for v in x.detach().cpu().tolist()]
+
+    def _print_contact_debug(self, env_ids: torch.Tensor, box_pos_w_for_debug: torch.Tensor):
+        if not self.cfg.debug_contact_modes:
+            return
+        if self._contact_debug_print_count >= self.cfg.debug_contact_modes_max_prints:
+            return
+
+        local_idx = 0
+        env_id = int(env_ids[local_idx].item())
+        mode_id = int(self.contact_mode_ids[env_id].item())
+
+        print(
+            "[G1_HAND_CONTACT_DEBUG] "
+            f"reset={self._contact_debug_print_count} "
+            f"env={env_id} "
+            f"box_pos={self._fmt_debug_vec(box_pos_w_for_debug[local_idx, :3])} "
+            f"box_yaw={float(self.box_yaw[env_id].detach().cpu()):+.3f} "
+            f"goal_xy={self._fmt_debug_vec(self.target_pos[env_id, :2])} "
+            f"goal_yaw={float(self.target_yaw[env_id].detach().cpu()):+.3f} "
+            f"mode_id={mode_id} "
+            f"mode={self._contact_mode_names[mode_id]} "
+            f"left_w={self._fmt_debug_vec(self.left_contact_target_w[env_id])} "
+            f"right_w={self._fmt_debug_vec(self.right_contact_target_w[env_id])}",
+            flush=True,
+        )
+        self._contact_debug_print_count += 1
+
     def _get_feedback(self):
         feedback = {
             "robot_pos": self.robot.data.root_pos_w[:, :3],
             "box_pos": self.box.data.root_pos_w[:, :3],
+            "box_yaw": self.box_yaw,
             "target_pos": self.target_pos,
+            "target_yaw": self.target_yaw,
             "heading": self.heading_angles,
+            "contact_mode_ids": self.contact_mode_ids,
+            "left_contact_target_w": self.left_contact_target_w,
+            "right_contact_target_w": self.right_contact_target_w,
         }
         return feedback
 
