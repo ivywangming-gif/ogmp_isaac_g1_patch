@@ -40,12 +40,17 @@ def palm_pos(env):
 
 
 def resolve_arm_joint_ids(joint_names, side):
-    side_tokens = ["left", "l_"] if side == "left" else ["right", "r_"]
+    """Strictly resolve arm joints for one side.
+
+    Do not use loose tokens like "l_" or "r_": they can match substrings inside
+    names such as shoulder_roll_joint and contaminate left/right groups.
+    """
+    prefix = "left_" if side == "left" else "right_"
     keep_tokens = ["shoulder", "elbow", "wrist"]
     ids = []
     for i, name in enumerate(joint_names):
         low = name.lower()
-        if any(tok in low for tok in side_tokens) and any(tok in low for tok in keep_tokens):
+        if low.startswith(prefix) and any(tok in low for tok in keep_tokens):
             ids.append(i)
     return ids
 
@@ -91,7 +96,7 @@ def main():
         joint_names = get_joint_names(env)
         left_ids = resolve_arm_joint_ids(joint_names, "left")
         right_ids = resolve_arm_joint_ids(joint_names, "right")
-        arm_ids = left_ids + right_ids
+        arm_ids = sorted(set(left_ids + right_ids))
 
         print("[G1_HAND_ACTION_DEBUG] selected_left_arm_joints:")
         for i in left_ids:
@@ -99,6 +104,11 @@ def main():
         print("[G1_HAND_ACTION_DEBUG] selected_right_arm_joints:")
         for i in right_ids:
             print(f"  {i}: {joint_names[i]}")
+
+        bad_left = [joint_names[i] for i in left_ids if not joint_names[i].lower().startswith("left_")]
+        bad_right = [joint_names[i] for i in right_ids if not joint_names[i].lower().startswith("right_")]
+        if bad_left or bad_right:
+            raise RuntimeError(f"Side contamination: bad_left={bad_left}, bad_right={bad_right}")
 
         if not arm_ids:
             print("[G1_HAND_ACTION_DEBUG] all_joint_names:")
