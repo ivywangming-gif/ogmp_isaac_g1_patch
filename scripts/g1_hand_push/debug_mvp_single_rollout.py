@@ -10,6 +10,7 @@ parser.add_argument("--mode", choices=["default", "zero", "policy"], required=Tr
 parser.add_argument("--checkpoint", type=str, default="logs/g1-hand-shortpush/mvp_rearface/G1_DC/model_9.pt")
 parser.add_argument("--steps", type=int, default=60)
 parser.add_argument("--print_every", type=int, default=5)
+parser.add_argument("--box_h", type=float, default=0.50)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -43,7 +44,7 @@ def make_cfg():
     cfg.num_observations = 113
 
     cfg.use_longbox_asset = True
-    cfg.longbox_dims = [1.6, 0.8, 0.5]
+    cfg.longbox_dims = [1.6, 0.8, float(args_cli.box_h)]
     cfg.longbox_source_size = 0.5
 
     cfg.omni_direction_lim = [0.0, 0.0]

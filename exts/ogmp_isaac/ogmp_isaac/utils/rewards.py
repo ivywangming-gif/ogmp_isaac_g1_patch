@@ -222,3 +222,20 @@ def rew_box_forward_progress(env):
 def rew_box_forward_vel(env):
     vx = torch.clamp(env.box.data.root_lin_vel_w[:, 0], min=0.0, max=env.cfg.rewards["box_forward_vel"]["max_vel"])
     return env.cfg.rewards["box_forward_vel"]["weight"] * vx
+
+
+# ---- G1 hand-push upright guarded MVP rewards ----
+
+def rew_base_height_floor(env):
+    z = env.robot.data.root_pos_w[:, 2]
+    min_h = env.cfg.rewards["base_height_floor"]["min_height"]
+    target_h = env.cfg.rewards["base_height_floor"]["target_height"]
+    score = torch.clamp((z - min_h) / max(target_h - min_h, 1e-6), min=0.0, max=1.0)
+    return env.cfg.rewards["base_height_floor"]["weight"] * score
+
+
+def rew_default_action_tracking(env):
+    err = torch.linalg.vector_norm(env.actions - env.robot.data.default_joint_pos, dim=-1) / env.max_joint_action
+    return env.cfg.rewards["default_action_tracking"]["weight"] * torch.exp(
+        -env.cfg.rewards["default_action_tracking"]["exp_scale"] * err
+    )

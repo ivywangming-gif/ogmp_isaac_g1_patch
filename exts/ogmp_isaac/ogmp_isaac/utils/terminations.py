@@ -68,3 +68,9 @@ def term_box_pos_y(env):
     ).squeeze()
     error_box_pos_y = torch.abs(env.box.data.root_pos_w[:, 1] - target_pos_y)
     return (error_box_pos_y > env.cfg.terminations["box_pos_y"]) & (env.oracle.modes >= 2)
+
+
+# ---- G1 hand-push physical fall termination ----
+
+def term_root_height_below(env):
+    return env.robot.data.root_pos_w[:, 2] < env.cfg.terminations["root_height_below"]
