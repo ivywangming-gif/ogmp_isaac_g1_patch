@@ -20,16 +20,17 @@ ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "obje
 
 @configclass
 class FlatBoxEnvCfg(BaseEnvCfg):
+    robot_model = "G1_DC"
     # Isaac Lab 5.x requires explicit Gym spaces.
     # For G1 PushBox:
     # obs = base_z(1) + base_ori(4) + joint_pos(37) + base_lin_vel(3)
     #     + base_ang_vel(3) + joint_vel(37) + box_dist(2)
     #     + target_dist(2) + sinusoid_phase(2) = 91
     # action = 37 G1 joints
-    observation_space = 109
+    observation_space = 113
     action_space = 37
     state_space = 0
-    num_observations = 109
+    num_observations = 113
     num_actions = 37
     marker_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/Visuals/myMarkers",
@@ -46,13 +47,18 @@ class FlatBoxEnvCfg(BaseEnvCfg):
     )
 
     rewards = {
-        "base_pos": {"weight": 0.4, "exp_coeff": 3.0},
-        "base_ori": {"weight": 0.23, "exp_coeff": 5.0},
-        "base_lin_vel": {"weight": 0.3, "exp_coeff": 2.0},
-        "box_closeness": {"weight": 0.5, "threshold": 0.5},
-        "preference": {"weight": -1.0,},
-        "torque_exp_norm": {"weight": 0.15, "exp_coeff": 0.05},
-        "action": {"weight": 0.15, "exp_coeff": 1.0},
+        "base_pos": {"weight": 0.20, "exp_scale": 3.0},
+        "base_ori": {"weight": 0.20, "exp_scale": 5.0},
+        "base_lin_vel": {"weight": 0.10, "exp_scale": 2.0},
+
+        # MVP-specific: force hands to rear-face targets and move box forward.
+        "hand_target_tracking": {"weight": 2.0, "exp_scale": 3.0},
+        "hand_target_close": {"weight": 1.0, "threshold": 0.18},
+        "box_forward_progress": {"weight": 8.0, "max_progress": 0.60},
+        "box_forward_vel": {"weight": 2.0, "max_vel": 0.50},
+
+        "torque_exp_norm": {"weight": 0.05, "exp_scale": 0.05},
+        "action_norm": {"weight": 0.05, "exp_scale": 1.0},
     }
     observations = [
         "base_z",
@@ -69,13 +75,7 @@ class FlatBoxEnvCfg(BaseEnvCfg):
         "contact_mode_onehot",
         "box_goal_yaw",
     ]
-    terminations = {
-        "base_pos_x": 0.4,
-        "base_pos_y": 0.4,
-        "base_pos_z": 0.1,
-        "box_pos_x": 0.2,
-        "box_pos_y": 0.2,
-    }
+    terminations = {}
     oracle = {
         "name": "PushBoxOracle",
         "params": {
@@ -84,24 +84,27 @@ class FlatBoxEnvCfg(BaseEnvCfg):
             "detach_thresh": 0.4,
         },
     }
-    omni_direction_lim = [0.0, 360.0]
+    omni_direction_lim = [0.0, 0.0]
     box_height = 0.5
+    use_longbox_asset = True
+    longbox_dims = [1.6, 0.8, 0.5]
+    longbox_source_size = 0.5
     height_to_file_name = {
         "0.5": "box_0p5m.usd",
         "1.0": "box_1m.usd",
         "1.5": "box_1p5m.usd",
     }
-    box_start = 1.0
-    target = 3.0
+    box_start = 1.05
+    target = 1.65
 
     # Env-level debug only: sample SE(2) goal and P1 two-hand contact mode.
-    debug_contact_modes = True
-    debug_contact_modes_max_prints = 5
+    debug_contact_modes = False
+    debug_contact_modes_max_prints = 0
     debug_hand_target_errors = True
     select_reachable_contact_mode = True
     allow_contact_target_swap = True
-    box_yaw_lim = [-3.14159265, 3.14159265]
-    goal_yaw_lim = [-3.14159265, 3.14159265]
+    box_yaw_lim = [0.0, 0.0]
+    goal_yaw_lim = [0.0, 0.0]
 
 
 class FlatBoxEnv(BaseEnv):
@@ -144,10 +147,15 @@ class FlatBoxEnv(BaseEnv):
             prim_path="/World/envs/env_.*/box",
             spawn=sim_utils.UsdFileCfg(
                 usd_path=os.path.join(ASSETS_DIR, self.cfg.height_to_file_name[str(self.cfg.box_height)]),
+                scale=(
+                    self.cfg.longbox_dims[0] / self.cfg.longbox_source_size,
+                    self.cfg.longbox_dims[1] / self.cfg.longbox_source_size,
+                    self.cfg.longbox_dims[2] / self.cfg.longbox_source_size,
+                ) if self.cfg.use_longbox_asset else None,
                 activate_contact_sensors=True,
             ),
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=(2.0, 0.0, self.cfg.box_height / 2),
+                pos=(2.0, 0.0, (self.cfg.longbox_dims[2] if self.cfg.use_longbox_asset else self.cfg.box_height) / 2),
                 lin_vel=(0.0, 0.0, 0.0),
                 ang_vel=(0.0, 0.0, 0.0),
             ),

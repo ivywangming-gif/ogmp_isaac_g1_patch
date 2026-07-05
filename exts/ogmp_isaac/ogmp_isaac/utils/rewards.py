@@ -186,3 +186,39 @@ def rew_feet_air_time(env):
         )
     reward /= i + 1
     return reward
+
+
+def _g1_hand_push_palm_pos(env):
+    body_pos_w = getattr(env.robot.data, "body_link_pos_w", None)
+    if body_pos_w is None:
+        body_pos_w = env.robot.data.body_pos_w
+    left = body_pos_w[:, env.left_hand_body_idx, :3]
+    right = body_pos_w[:, env.right_hand_body_idx, :3]
+    return left, right
+
+def rew_hand_target_tracking(env):
+    left, right = _g1_hand_push_palm_pos(env)
+    left_err = torch.linalg.vector_norm(left - env.left_contact_target_w, dim=-1)
+    right_err = torch.linalg.vector_norm(right - env.right_contact_target_w, dim=-1)
+    err = left_err + right_err
+    return env.cfg.rewards["hand_target_tracking"]["weight"] * torch.exp(
+        -env.cfg.rewards["hand_target_tracking"]["exp_scale"] * err
+    )
+
+def rew_hand_target_close(env):
+    left, right = _g1_hand_push_palm_pos(env)
+    left_err = torch.linalg.vector_norm(left - env.left_contact_target_w, dim=-1)
+    right_err = torch.linalg.vector_norm(right - env.right_contact_target_w, dim=-1)
+    close = ((left_err < env.cfg.rewards["hand_target_close"]["threshold"]) &
+             (right_err < env.cfg.rewards["hand_target_close"]["threshold"])).float()
+    return env.cfg.rewards["hand_target_close"]["weight"] * close
+
+def rew_box_forward_progress(env):
+    start_x = env.scene.env_origins[:, 0] + env.cfg.box_start
+    progress = env.box.data.root_pos_w[:, 0] - start_x
+    progress = torch.clamp(progress, min=-0.05, max=env.cfg.rewards["box_forward_progress"]["max_progress"])
+    return env.cfg.rewards["box_forward_progress"]["weight"] * progress
+
+def rew_box_forward_vel(env):
+    vx = torch.clamp(env.box.data.root_lin_vel_w[:, 0], min=0.0, max=env.cfg.rewards["box_forward_vel"]["max_vel"])
+    return env.cfg.rewards["box_forward_vel"]["weight"] * vx

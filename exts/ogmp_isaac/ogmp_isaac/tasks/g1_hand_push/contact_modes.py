@@ -1,107 +1,54 @@
-"""Contact mode library for G1 two-hand short-horizon long-box pushing.
+"""Contact mode library for G1-Hand-ShortPush longbox MVP.
 
-Box:
-- length = 1.6 m, half-length hx = 0.8
-- width  = 0.8 m, half-width  hy = 0.4
-- height = 0.5 m
-
-Coordinate convention:
-- Box local x: long axis
-- Box local y: short axis / long-side normal
-- Box local z: vertical
-- Contact points are in box local frame.
-
-First version:
-- Use only P1 same-long-side modes.
-- Do not use opposite-side clamping modes yet.
+Box convention:
+- Box local frame is relative to root/COM.
+- Longbox size: x=1.6m, y=0.8m, z=0.5m.
+- Half extents: x=0.8, y=0.4, z=0.25.
+- Contact z local=0.20 -> world z≈0.45 when box COM z=0.25.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 import torch
 
 
 @dataclass(frozen=True)
 class ContactMode:
     name: str
-    left_xyz: tuple[float, float, float]
-    right_xyz: tuple[float, float, float]
-    mode_type: str
-    yaw_authority: str
+    left_local: tuple[float, float, float]
+    right_local: tuple[float, float, float]
 
 
-# P1 modes only.
-# z = 0.35 is chosen for H=0.5 box: above center, below top surface.
-P1_CONTACT_MODES: tuple[ContactMode, ...] = (
-    ContactMode(
-        name="same_long_side_center_y_plus",
-        left_xyz=(-0.25, +0.40, +0.35),
-        right_xyz=(+0.25, +0.40, +0.35),
-        mode_type="same_side_translation",
-        yaw_authority="low",
-    ),
-    ContactMode(
-        name="same_long_side_center_y_minus",
-        left_xyz=(-0.25, -0.40, +0.35),
-        right_xyz=(+0.25, -0.40, +0.35),
-        mode_type="same_side_translation",
-        yaw_authority="low",
-    ),
-    ContactMode(
-        name="same_long_side_front_bias_y_plus",
-        left_xyz=(+0.25, +0.40, +0.35),
-        right_xyz=(+0.70, +0.40, +0.35),
-        mode_type="same_side_yaw",
-        yaw_authority="high",
-    ),
-    ContactMode(
-        name="same_long_side_back_bias_y_plus",
-        left_xyz=(-0.70, +0.40, +0.35),
-        right_xyz=(-0.25, +0.40, +0.35),
-        mode_type="same_side_yaw",
-        yaw_authority="high",
-    ),
-    ContactMode(
-        name="same_long_side_front_bias_y_minus",
-        left_xyz=(+0.25, -0.40, +0.35),
-        right_xyz=(+0.70, -0.40, +0.35),
-        mode_type="same_side_yaw",
-        yaw_authority="high",
-    ),
-    ContactMode(
-        name="same_long_side_back_bias_y_minus",
-        left_xyz=(-0.70, -0.40, +0.35),
-        right_xyz=(-0.25, -0.40, +0.35),
-        mode_type="same_side_yaw",
-        yaw_authority="high",
-    ),
+Z = 0.20
+
+CONTACT_MODES: tuple[ContactMode, ...] = (
+    # Forward push from rear face. Box center x ahead of robot; rear face is local x=-0.8.
+    ContactMode("rear_face_center", (-0.80, +0.18, Z), (-0.80, -0.18, Z)),
+    ContactMode("rear_face_wide", (-0.80, +0.28, Z), (-0.80, -0.28, Z)),
+    ContactMode("rear_face_y_plus_bias", (-0.80, +0.12, Z), (-0.80, +0.34, Z)),
+    ContactMode("rear_face_y_minus_bias", (-0.80, -0.34, Z), (-0.80, -0.12, Z)),
+
+    # Same-long-side modes for later yaw / side-push experiments.
+    ContactMode("same_long_side_center_y_plus", (-0.25, +0.40, Z), (+0.25, +0.40, Z)),
+    ContactMode("same_long_side_center_y_minus", (-0.25, -0.40, Z), (+0.25, -0.40, Z)),
+    ContactMode("same_long_side_front_bias_y_plus", (+0.25, +0.40, Z), (+0.70, +0.40, Z)),
+    ContactMode("same_long_side_back_bias_y_plus", (-0.70, +0.40, Z), (-0.25, +0.40, Z)),
+    ContactMode("same_long_side_front_bias_y_minus", (+0.25, -0.40, Z), (+0.70, -0.40, Z)),
+    ContactMode("same_long_side_back_bias_y_minus", (-0.70, -0.40, Z), (-0.25, -0.40, Z)),
 )
 
 
 def get_mode_names() -> list[str]:
-    return [m.name for m in P1_CONTACT_MODES]
+    return [m.name for m in CONTACT_MODES]
 
 
-def get_mode_local_points(device: str | torch.device = "cpu", dtype: torch.dtype = torch.float32):
-    """Return left/right local contact points.
-
-    Returns:
-        left_points:  tensor shape (num_modes, 3)
-        right_points: tensor shape (num_modes, 3)
-    """
-    left = torch.tensor([m.left_xyz for m in P1_CONTACT_MODES], device=device, dtype=dtype)
-    right = torch.tensor([m.right_xyz for m in P1_CONTACT_MODES], device=device, dtype=dtype)
-    return left, right
-
-
-def yaw_to_rot2d(yaw: torch.Tensor) -> torch.Tensor:
-    c = torch.cos(yaw)
-    s = torch.sin(yaw)
-    row0 = torch.stack([c, -s], dim=-1)
-    row1 = torch.stack([s, c], dim=-1)
-    return torch.stack([row0, row1], dim=-2)
+def get_local_contacts(mode_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    device = mode_ids.device
+    dtype = torch.float32
+    left = torch.tensor([m.left_local for m in CONTACT_MODES], device=device, dtype=dtype)
+    right = torch.tensor([m.right_local for m in CONTACT_MODES], device=device, dtype=dtype)
+    return left[mode_ids], right[mode_ids]
 
 
 def local_contacts_to_world(
@@ -109,62 +56,15 @@ def local_contacts_to_world(
     box_yaw_w: torch.Tensor,
     mode_ids: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Convert local contact mode points to world-frame targets.
+    left_l, right_l = get_local_contacts(mode_ids)
 
-    Args:
-        box_pos_w: shape (N, 3)
-        box_yaw_w: shape (N,)
-        mode_ids: shape (N,), values in [0, num_modes)
+    cos_yaw = torch.cos(box_yaw_w)
+    sin_yaw = torch.sin(box_yaw_w)
 
-    Returns:
-        left_w, right_w: each shape (N, 3)
-    """
-    device = box_pos_w.device
-    dtype = box_pos_w.dtype
+    def transform(p_l: torch.Tensor) -> torch.Tensor:
+        x = cos_yaw * p_l[:, 0] - sin_yaw * p_l[:, 1]
+        y = sin_yaw * p_l[:, 0] + cos_yaw * p_l[:, 1]
+        z = p_l[:, 2]
+        return box_pos_w + torch.stack((x, y, z), dim=-1)
 
-    left_local_all, right_local_all = get_mode_local_points(device=device, dtype=dtype)
-    left_local = left_local_all[mode_ids]
-    right_local = right_local_all[mode_ids]
-
-    R = yaw_to_rot2d(box_yaw_w)
-
-    left_xy = box_pos_w[:, :2] + torch.einsum("nij,nj->ni", R, left_local[:, :2])
-    right_xy = box_pos_w[:, :2] + torch.einsum("nij,nj->ni", R, right_local[:, :2])
-
-    left_z = box_pos_w[:, 2] + left_local[:, 2]
-    right_z = box_pos_w[:, 2] + right_local[:, 2]
-
-    left_w = torch.cat([left_xy, left_z.unsqueeze(-1)], dim=-1)
-    right_w = torch.cat([right_xy, right_z.unsqueeze(-1)], dim=-1)
-    return left_w, right_w
-
-
-def demo() -> None:
-    print("=== P1 contact modes ===")
-    for i, m in enumerate(P1_CONTACT_MODES):
-        print(f"{i}: {m.name}")
-        print(f"   L={m.left_xyz} R={m.right_xyz} type={m.mode_type} yaw={m.yaw_authority}")
-
-    box_pos = torch.tensor([[0.0, 0.0, 0.0], [1.0, 2.0, 0.0]], dtype=torch.float32)
-    box_yaw = torch.tensor([0.0, torch.pi / 2], dtype=torch.float32)
-    mode_ids = torch.tensor([0, 2], dtype=torch.long)
-
-    left, right = local_contacts_to_world(box_pos, box_yaw, mode_ids)
-
-    print("=== demo world contacts ===")
-    print("box_pos:")
-    print(box_pos)
-    print("box_yaw:")
-    print(box_yaw)
-    print("mode_ids:")
-    print(mode_ids)
-    print("left_w:")
-    print(left)
-    print("right_w:")
-    print(right)
-    print("separation:")
-    print(torch.linalg.norm(left - right, dim=-1))
-
-
-if __name__ == "__main__":
-    demo()
+    return transform(left_l), transform(right_l)
